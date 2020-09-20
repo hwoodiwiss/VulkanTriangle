@@ -3,12 +3,14 @@
 #include <iostream>
 #include <vector>
 #include <sstream>
+#include <fstream>
 #include <filesystem>
 
 using std::cout;
 using std::endl;
 using std::vector;
 using std::string;
+using std::ifstream;
 namespace fs = std::filesystem;
 
 const static float Pi = 3.14159265359f;
@@ -518,6 +520,9 @@ int main(int argc, char** argv)
 		0.0f, 0.0f, 0.5f, 1.0f
 	);
 
+	auto vertShader = LoadShader("./shaders/vertex.spv");
+	auto fragShader = LoadShader("./shaders/pixel.spv");
+
 	MSG message = { 0 };
 	while (message.message != WM_QUIT)
 	{
@@ -618,4 +623,19 @@ std::string GetVkMemTypeStr(vk::MemoryPropertyFlags MemPropFlag)
 	out << vk::to_string(MemPropFlag);
 
 	return out.str();
+}
+
+vector<char> LoadShader(string shaderPath)
+{
+	fs::path shaderLoc = fs::absolute(shaderPath);
+	if (fs::exists(shaderLoc)) {
+		auto shaderSize = fs::file_size(shaderLoc);
+		vector<char> shaderData = vector<char>(shaderSize);
+		std::ifstream shaderFileStream = std::ifstream(shaderLoc, std::ifstream::in | std::ifstream::binary);
+		shaderFileStream.read(shaderData.data(), shaderSize);
+		return shaderData;
+	}
+	else {
+		throw std::exception("An error occured reading shader data.");
+	}
 }
