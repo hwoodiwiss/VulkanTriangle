@@ -3,10 +3,13 @@
 #include <iostream>
 #include <vector>
 #include <sstream>
+#include <filesystem>
 
 using std::cout;
 using std::endl;
 using std::vector;
+using std::string;
+namespace fs = std::filesystem;
 
 const static float Pi = 3.14159265359f;
 
@@ -239,6 +242,8 @@ HWND CreateAppWindow(HINSTANCE instance);
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 
 std::string GetVkMemTypeStr(vk::MemoryPropertyFlags MemPropFlag);
+
+vector<char> LoadShader(string);
 
 int main(int argc, char** argv)
 {
