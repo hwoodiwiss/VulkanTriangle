@@ -1,4 +1,4 @@
-#define VK_USE_PLATFORM_WIN32_KHR
+#define VK_USE_PLATFORM_WIN32_KHR 1
 #include <vulkan/vulkan.hpp>
 #include <iostream>
 #include <vector>
@@ -291,7 +291,7 @@ int main(int argc, char** argv)
 	int index = 0;
 	int gfxQueueIndex = 0;
 
-	for (auto queues : vulkanPhyDevice.getQueueFamilyProperties())
+	for (const auto& queues : vulkanPhyDevice.getQueueFamilyProperties())
 	{
 		float* queuePriorities = new float[queues.queueCount]{ 1.0f };
 		queueCreateInfos.push_back(
@@ -355,7 +355,7 @@ int main(int argc, char** argv)
 	index = 0;
 	vector<uint32_t> presentGfxQueueIndex = {};
 
-	for (auto queues : vulkanPhyDevice.getQueueFamilyProperties())
+	for (const auto& queues : vulkanPhyDevice.getQueueFamilyProperties())
 	{
 		vk::Bool32 supportsPresent = vulkanPhyDevice.getSurfaceSupportKHR(index, vulkanSurface);
 		if ((queues.queueFlags & vk::QueueFlagBits::eGraphics) && supportsPresent)
@@ -472,7 +472,7 @@ int main(int argc, char** argv)
 		cout << "_____________________________________" << endl;
 
 	}
-
+	
 	vk::MemoryAllocateInfo depthBufferAllocateInfo =
 		vk::MemoryAllocateInfo()
 		.setAllocationSize(depthBufferMemReqs.size)
