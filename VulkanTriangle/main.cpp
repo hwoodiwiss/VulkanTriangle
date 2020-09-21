@@ -29,7 +29,7 @@ struct Vector3
 {
 	float x, y, z;
 
-	Vector3(float x, float y, float z) :  x(x), y(y), z(z) {}
+	Vector3(float x, float y, float z) : x(x), y(y), z(z) {}
 
 	Vector3 operator-(Vector3& rhs)
 	{
@@ -215,7 +215,7 @@ struct Matrix4x4
 			0.0f, 1.0f, 0.0f, 0.0f,
 			0.0f, 0.0f, 1.0f, 0.0f,
 			0.0f, 0.0f, 0.0f, 1.0f
-			);
+		);
 	}
 };
 
@@ -246,6 +246,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 std::string GetVkMemTypeStr(vk::MemoryPropertyFlags MemPropFlag);
 
 vector<char> LoadShader(string);
+vk::ShaderModule CreateModuleForShader(vk::Device& device, vector<char>& shaderData);
 
 int main(int argc, char** argv)
 {
@@ -285,11 +286,11 @@ int main(int argc, char** argv)
 	}
 
 	vk::PhysicalDevice vulkanPhyDevice = devices[0];
-	
+
 	vector<vk::DeviceQueueCreateInfo> queueCreateInfos;
 	int index = 0;
 	int gfxQueueIndex = 0;
-	
+
 	for (auto queues : vulkanPhyDevice.getQueueFamilyProperties())
 	{
 		float* queuePriorities = new float[queues.queueCount]{ 1.0f };
@@ -306,7 +307,7 @@ int main(int argc, char** argv)
 
 		index++;
 	}
-	
+
 	auto phyExt = vulkanPhyDevice.enumerateDeviceExtensionProperties();
 	vector<char*> phyDevExtNames = {};
 
@@ -331,24 +332,10 @@ int main(int argc, char** argv)
 		.setEnabledLayerCount(ValidationLayers.size())
 		.setPpEnabledLayerNames(ValidationLayers.data())
 		.setPEnabledFeatures(&(vulkanPhyDevice.getFeatures()));
-	
+
 	//Create virtual device interface
 	vk::Device vulkanDevice = vulkanPhyDevice.createDevice(deviceCreInfo);
-
-	vk::CommandPoolCreateInfo commandPoolInfo = 
-		vk::CommandPoolCreateInfo()
-		.setQueueFamilyIndex(gfxQueueIndex);
-
-	vk::CommandPool vulkanCommandPool = vulkanDevice.createCommandPool(commandPoolInfo);
-
-	vk::CommandBufferAllocateInfo commandBufferInfo =
-		vk::CommandBufferAllocateInfo()
-		.setCommandBufferCount(1)
-		.setCommandPool(vulkanCommandPool)
-		.setLevel(vk::CommandBufferLevel::ePrimary);
-
-	vector<vk::CommandBuffer> vulkanCommandBuffersArray = vulkanDevice.allocateCommandBuffers(commandBufferInfo);
-
+	vk::Queue gfxQueue = vulkanDevice.getQueue(gfxQueueIndex, 0);
 	vector<const char*> deviceExtensionNames = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
 
 	AppWnd = CreateAppWindow(currInstance);
@@ -406,17 +393,18 @@ int main(int argc, char** argv)
 		.setImageUsage(surfaceCapabilities.supportedUsageFlags)
 		.setOldSwapchain(nullptr);
 
+	vk::Queue presentQueue = vulkanDevice.getQueue(presentGfxQueueIndex[0], 0);
 	vk::SwapchainKHR vulkanSwapchain;
 
 	try
 	{
 		vulkanSwapchain = vulkanDevice.createSwapchainKHR(swapchainCreateInfo);
 	}
-	catch(...)
+	catch (...)
 	{
 
 	}
-	auto scImages = vulkanDevice.getSwapchainImagesKHR(vulkanSwapchain);
+	auto swapChainImages = vulkanDevice.getSwapchainImagesKHR(vulkanSwapchain);
 
 	vk::ImageCreateInfo depthBufferInfo =
 		vk::ImageCreateInfo()
@@ -430,26 +418,50 @@ int main(int argc, char** argv)
 		.setUsage(vk::ImageUsageFlagBits::eDepthStencilAttachment)
 		.setSharingMode(vk::SharingMode::eExclusive);
 
+	auto swapChainImageViews = vector<vk::ImageView>();
+
+	for (auto image : swapChainImages) {
+		vk::ImageViewCreateInfo ivCreateInfo =
+			vk::ImageViewCreateInfo()
+			.setImage(image)
+			.setViewType(vk::ImageViewType::e2D)
+			.setFormat(vk::Format::eB8G8R8A8Unorm)
+			.setComponents(vk::ComponentMapping()
+				.setA(vk::ComponentSwizzle::eIdentity)
+				.setR(vk::ComponentSwizzle::eIdentity)
+				.setG(vk::ComponentSwizzle::eIdentity)
+				.setB(vk::ComponentSwizzle::eIdentity))
+			.setSubresourceRange(vk::ImageSubresourceRange()
+				.setAspectMask(vk::ImageAspectFlagBits::eColor)
+				.setBaseMipLevel(0)
+				.setLevelCount(1)
+				.setBaseArrayLayer(0)
+				.setLayerCount(1));
+
+		auto iv = vulkanDevice.createImageView(ivCreateInfo);
+		swapChainImageViews.push_back(iv);
+	}
+
 	vk::Image depthBuffer = vulkanDevice.createImage(depthBufferInfo);
 
 	vk::MemoryRequirements depthBufferMemReqs = vulkanDevice.getImageMemoryRequirements(depthBuffer);
 	auto ReqedMemFlags = vk::MemoryPropertyFlags(depthBufferMemReqs.memoryTypeBits);
-	
+
 	//Depth buffer seems to need host coherent memory
 	auto HostCoherent = ReqedMemFlags & vk::MemoryPropertyFlagBits::eHostCoherent;
 	auto DeviceUncachedAMD = ReqedMemFlags & vk::MemoryPropertyFlagBits::eDeviceUncachedAMD;
-	
+
 	auto memProps = vulkanPhyDevice.getMemoryProperties();
 
 	int deviceLocalMemIdx = 0;
 
-	for(int memIdx = 0; memIdx < memProps.memoryTypeCount; memIdx++)
+	for (int memIdx = 0; memIdx < memProps.memoryTypeCount; memIdx++)
 	{
 		auto memProp = memProps.memoryTypes[memIdx];
 		cout << "Memory type: " << memIdx << endl
 			<< "Properties: " << endl << GetVkMemTypeStr(memProp.propertyFlags) << endl
 			<< "Heap Offset: " << memProp.heapIndex << endl;
-		
+
 		if (memProp.propertyFlags & ReqedMemFlags)
 		{
 			deviceLocalMemIdx = memIdx + 1; // Add 1, because the device meme indices aren't zero based :'(
@@ -465,9 +477,9 @@ int main(int argc, char** argv)
 		vk::MemoryAllocateInfo()
 		.setAllocationSize(depthBufferMemReqs.size)
 		.setMemoryTypeIndex(deviceLocalMemIdx - 2);
-	
+
 	vk::DeviceMemory depthBufferPtr = vulkanDevice.allocateMemory(depthBufferAllocateInfo);
-	
+
 	vulkanDevice.bindImageMemory(depthBuffer, depthBufferPtr, 0);
 
 	vk::ImageViewCreateInfo imageViewInfo =
@@ -488,6 +500,90 @@ int main(int argc, char** argv)
 		.setViewType(vk::ImageViewType::e2D);
 
 	vk::ImageView depthBufferView = vulkanDevice.createImageView(imageViewInfo);
+
+	//Load shader programs
+	auto vertShader = LoadShader("./shaders/vertex.spv");
+	auto fragShader = LoadShader("./shaders/pixel.spv");
+
+	auto vertShaderModule = CreateModuleForShader(vulkanDevice, vertShader);
+	auto fragShaderModule = CreateModuleForShader(vulkanDevice, fragShader);
+
+	//Setup pipeline stages
+	auto pipelineShaderStages = vector<vk::PipelineShaderStageCreateInfo>{
+		vk::PipelineShaderStageCreateInfo()
+		.setStage(vk::ShaderStageFlagBits::eVertex)
+		.setModule(vertShaderModule)
+		.setPName("main"),
+		vk::PipelineShaderStageCreateInfo()
+		.setStage(vk::ShaderStageFlagBits::eFragment)
+		.setModule(fragShaderModule)
+		.setPName("main")
+	};
+
+	vk::PipelineVertexInputStateCreateInfo vertexInputCreateInfo =
+		vk::PipelineVertexInputStateCreateInfo()
+		.setVertexBindingDescriptionCount(0)
+		.setVertexAttributeDescriptionCount(0);
+
+	vk::PipelineInputAssemblyStateCreateInfo inputAssemblyCreateInfo =
+		vk::PipelineInputAssemblyStateCreateInfo()
+		.setTopology(vk::PrimitiveTopology::eTriangleList)
+		.setPrimitiveRestartEnable(false);
+
+	vk::Viewport viewport = vk::Viewport()
+		.setX(0.0f)
+		.setY(0.0f)
+		.setWidth(surfaceCapabilities.minImageExtent.width)
+		.setHeight(surfaceCapabilities.minImageExtent.height)
+		.setMinDepth(0.0f)
+		.setMaxDepth(1.0f);
+
+	vk::Rect2D  scissor = vk::Rect2D().setExtent(surfaceCapabilities.minImageExtent).setOffset({ 0, 0 });
+
+	vk::PipelineViewportStateCreateInfo viewportStateCreateInfo =
+		vk::PipelineViewportStateCreateInfo()
+		.setViewportCount(1)
+		.setPViewports(&viewport)
+		.setScissorCount(1)
+		.setPScissors(&scissor);
+
+	vk::PipelineRasterizationStateCreateInfo rasterizerStateCreateInfo =
+		vk::PipelineRasterizationStateCreateInfo()
+		.setDepthClampEnable(false)
+		.setRasterizerDiscardEnable(false)
+		.setPolygonMode(vk::PolygonMode::eFill)
+		.setLineWidth(1.0f)
+		.setCullMode(vk::CullModeFlagBits::eBack)
+		.setFrontFace(vk::FrontFace::eClockwise)
+		.setDepthBiasEnable(false)
+		.setDepthBiasConstantFactor(0.0f)
+		.setDepthBiasClamp(0.0f)
+		.setDepthBiasSlopeFactor(0.0f);
+
+	vk::PipelineMultisampleStateCreateInfo multisampleStateCreateInfo =
+		vk::PipelineMultisampleStateCreateInfo()
+		.setSampleShadingEnable(false)
+		.setRasterizationSamples(vk::SampleCountFlagBits::e1)
+		.setMinSampleShading(1.0f)
+		.setAlphaToCoverageEnable(false)
+		.setAlphaToOneEnable(false);
+
+	vk::PipelineColorBlendAttachmentState colourBlendAttachmentDesc =
+		vk::PipelineColorBlendAttachmentState()
+		.setColorWriteMask(vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA)
+		.setBlendEnable(false)
+		.setSrcColorBlendFactor(vk::BlendFactor::eOne)
+		.setDstColorBlendFactor(vk::BlendFactor::eZero)
+		.setColorBlendOp(vk::BlendOp::eAdd)
+		.setSrcAlphaBlendFactor(vk::BlendFactor::eOne)
+		.setDstAlphaBlendFactor(vk::BlendFactor::eZero)
+		.setAlphaBlendOp(vk::BlendOp::eAdd);
+
+	vk::PipelineColorBlendStateCreateInfo colourBlendStateCreateInfo =
+		vk::PipelineColorBlendStateCreateInfo()
+		.setLogicOpEnable(false)
+		.setAttachmentCount(1)
+		.setPAttachments(&colourBlendAttachmentDesc);
 
 	vk::DescriptorSetLayoutBinding vulkanDescriptorSetLayoutBinding =
 		vk::DescriptorSetLayoutBinding()
@@ -511,7 +607,131 @@ int main(int argc, char** argv)
 
 	vk::PipelineLayout vulkanPipelineLayout = vulkanDevice.createPipelineLayout(vulkanPipelineLayoutInfo);
 
-	Matrix4x4 ProjectionMatrix = GeneratePerspective(90.0f, 1920, 1080, 1.0f, 100.0f);
+	vk::AttachmentDescription colourAttachment =
+		vk::AttachmentDescription()
+		.setFormat(vk::Format::eB8G8R8A8Unorm)
+		.setSamples(vk::SampleCountFlagBits::e1)
+		.setLoadOp(vk::AttachmentLoadOp::eClear)
+		.setStoreOp(vk::AttachmentStoreOp::eStore)
+		.setStencilLoadOp(vk::AttachmentLoadOp::eDontCare)
+		.setStencilStoreOp(vk::AttachmentStoreOp::eDontCare)
+		.setInitialLayout(vk::ImageLayout::eUndefined)
+		.setFinalLayout(vk::ImageLayout::ePresentSrcKHR);
+
+	vk::AttachmentReference colourAttachmentRef =
+		vk::AttachmentReference()
+		.setAttachment(0)
+		.setLayout(vk::ImageLayout::eColorAttachmentOptimal);
+
+	vk::SubpassDescription subpassDesc =
+		vk::SubpassDescription()
+		.setPipelineBindPoint(vk::PipelineBindPoint::eGraphics) // This is where you could switch for Compute or RayTraceNV
+		.setColorAttachmentCount(1)
+		.setPColorAttachments(&colourAttachmentRef);
+
+	vk::SubpassDependency spDependency =
+		vk::SubpassDependency()
+		.setSrcSubpass(VK_SUBPASS_EXTERNAL)
+		.setSrcStageMask(vk::PipelineStageFlagBits::eColorAttachmentOutput)
+		.setDstStageMask(vk::PipelineStageFlagBits::eColorAttachmentOutput)
+		.setDstAccessMask(vk::AccessFlagBits::eColorAttachmentWrite);
+
+	vk::RenderPassCreateInfo renderPassCreateInfo =
+		vk::RenderPassCreateInfo()
+		.setAttachmentCount(1)
+		.setPAttachments(&colourAttachment)
+		.setSubpassCount(1)
+		.setPSubpasses(&subpassDesc)
+		.setDependencyCount(1)
+		.setPDependencies(&spDependency);
+
+	vk::RenderPass renderPass = vulkanDevice.createRenderPass(renderPassCreateInfo);
+
+	vk::GraphicsPipelineCreateInfo graphicsPipelineInfo =
+		vk::GraphicsPipelineCreateInfo()
+		.setStageCount(2)
+		.setPStages(pipelineShaderStages.data())
+		.setPVertexInputState(&vertexInputCreateInfo)
+		.setPInputAssemblyState(&inputAssemblyCreateInfo)
+		.setPViewportState(&viewportStateCreateInfo)
+		.setPRasterizationState(&rasterizerStateCreateInfo)
+		.setPMultisampleState(&multisampleStateCreateInfo)
+		.setPDepthStencilState(nullptr)
+		.setPColorBlendState(&colourBlendStateCreateInfo)
+		.setPDynamicState(nullptr)
+		.setLayout(vulkanPipelineLayout)
+		.setRenderPass(renderPass)
+		.setSubpass(0);
+
+	vk::Pipeline vulkanGraphicsPipeline = vulkanDevice.createGraphicsPipeline(vk::PipelineCache(), graphicsPipelineInfo);
+
+	//Setup render Passes
+	cout << "SC Image View Count: " << swapChainImageViews.size() << endl;
+	vector<vk::Framebuffer> swapChainFrameBuffers = vector<vk::Framebuffer>();
+
+	for (auto imageView : swapChainImageViews) {
+		vk::FramebufferCreateInfo fbCreateInfo =
+			vk::FramebufferCreateInfo()
+			.setRenderPass(renderPass)
+			.setAttachmentCount(1)
+			.setPAttachments(&imageView)
+			.setWidth(surfaceCapabilities.minImageExtent.width)
+			.setHeight(surfaceCapabilities.minImageExtent.height)
+			.setLayers(1);
+
+		swapChainFrameBuffers.push_back(vulkanDevice.createFramebuffer(fbCreateInfo));
+	}
+
+	//Setup Command pool
+	vk::CommandPoolCreateInfo commandPoolInfo =
+		vk::CommandPoolCreateInfo()
+		.setQueueFamilyIndex(gfxQueueIndex);
+
+	vk::CommandPool vulkanCommandPool = vulkanDevice.createCommandPool(commandPoolInfo);
+
+	vk::CommandBufferAllocateInfo commandBufferInfo =
+		vk::CommandBufferAllocateInfo()
+		.setCommandBufferCount(swapChainFrameBuffers.size())
+		.setCommandPool(vulkanCommandPool)
+		.setLevel(vk::CommandBufferLevel::ePrimary);
+
+	vector<vk::CommandBuffer> vulkanCommandBuffersArray = vulkanDevice.allocateCommandBuffers(commandBufferInfo);
+
+	//Record render sequence to command buffer
+	for (int i = 0; i < vulkanCommandBuffersArray.size(); i++) {
+		auto buffer = vulkanCommandBuffersArray[i];
+		vk::CommandBufferBeginInfo beginInfo = vk::CommandBufferBeginInfo();
+
+		buffer.begin(beginInfo);
+
+		vk::ClearValue clearColour = vk::ClearValue()
+			.setColor(vk::ClearColorValue(std::array<float, 4Ui64>({ (100.0f / 255.0f), (149.0f / 255.0f), (237.0f / 255.0f), 1.0f }))); // Cornflower, the DirectX classic blue normalized to 0.0 - 1.0
+
+		vk::RenderPassBeginInfo renderPassBeginInfo =
+			vk::RenderPassBeginInfo()
+			.setRenderPass(renderPass)
+			.setFramebuffer(swapChainFrameBuffers[i])
+			.setRenderArea(vk::Rect2D().setOffset({ 0,0 }).setExtent(surfaceCapabilities.minImageExtent))
+			.setClearValueCount(1)
+			.setPClearValues(&clearColour);
+
+		buffer.beginRenderPass(renderPassBeginInfo, vk::SubpassContents::eInline);
+
+		buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, vulkanGraphicsPipeline);
+
+		buffer.draw(3, 1, 0, 0);
+
+		buffer.endRenderPass();
+
+		buffer.end();
+	}
+
+	//Setup default semaphores
+	vk::SemaphoreCreateInfo semaphoreCreateInfo = vk::SemaphoreCreateInfo();
+	vk::Semaphore imageAvailableSemaphore = vulkanDevice.createSemaphore(semaphoreCreateInfo);
+	vk::Semaphore renderFinishedSemaphore = vulkanDevice.createSemaphore(semaphoreCreateInfo);
+
+	Matrix4x4 ProjectionMatrix = GeneratePerspective(90.0f, surfaceCapabilities.minImageExtent.width, surfaceCapabilities.minImageExtent.height, 1.0f, 100.0f);
 	Matrix4x4 ViewMatrix = GenerateView(Vector3(-5.0f, 3.0f, -10.0f), Vector3(0.0f, 0.0f, 0.0f), Vector3(0.0f, -1.0f, 0.0f));
 	Matrix4x4 ClipMatrix = Matrix4x4(
 		1.0f, 0.0f, 0.0f, 0.0f,
@@ -519,9 +739,6 @@ int main(int argc, char** argv)
 		0.0f, 0.0f, 0.5f, 0.0f,
 		0.0f, 0.0f, 0.5f, 1.0f
 	);
-
-	auto vertShader = LoadShader("./shaders/vertex.spv");
-	auto fragShader = LoadShader("./shaders/pixel.spv");
 
 	MSG message = { 0 };
 	while (message.message != WM_QUIT)
@@ -534,6 +751,38 @@ int main(int argc, char** argv)
 			TranslateMessage(&message);
 			DispatchMessage(&message);
 		}
+
+		//The vulkan draw loop
+		uint32_t imageIndex;
+		vulkanDevice.acquireNextImageKHR(vulkanSwapchain, UINT64_MAX, imageAvailableSemaphore, vk::Fence(), &imageIndex);
+
+		vk::Semaphore waitSemaphores[] = { imageAvailableSemaphore };
+		vk::Semaphore signalSemaphores[] = { renderFinishedSemaphore };
+		vk::PipelineStageFlags waitStages[] = { vk::PipelineStageFlagBits::eColorAttachmentOutput };
+		vk::SubmitInfo submitInfo =
+			vk::SubmitInfo()
+			.setWaitSemaphoreCount(1)
+			.setPWaitSemaphores(waitSemaphores)
+			.setPWaitDstStageMask(waitStages)
+			.setCommandBufferCount(1)
+			.setPCommandBuffers(&vulkanCommandBuffersArray[imageIndex])
+			.setSignalSemaphoreCount(1)
+			.setPSignalSemaphores(signalSemaphores);
+
+		gfxQueue.submit(submitInfo, vk::Fence());
+		vk::SwapchainKHR swapChains[] = { vulkanSwapchain };
+
+		vk::PresentInfoKHR presentInfo =
+			vk::PresentInfoKHR()
+			.setWaitSemaphoreCount(1)
+			.setPWaitSemaphores(signalSemaphores)
+			.setSwapchainCount(1)
+			.setPSwapchains(swapChains)
+			.setPImageIndices(&imageIndex);
+
+		presentQueue.presentKHR(presentInfo);
+
+		vulkanDevice.waitIdle();
 	}
 
 	return 0;
@@ -638,4 +887,14 @@ vector<char> LoadShader(string shaderPath)
 	else {
 		throw std::exception("An error occured reading shader data.");
 	}
+}
+
+vk::ShaderModule CreateModuleForShader(vk::Device& device, vector<char>& shaderData)
+{
+	vk::ShaderModuleCreateInfo createInfo =
+		vk::ShaderModuleCreateInfo()
+		.setCodeSize(shaderData.size())
+		.setPCode(reinterpret_cast<uint32_t*>(shaderData.data()));
+
+	return device.createShaderModule(createInfo);
 }
