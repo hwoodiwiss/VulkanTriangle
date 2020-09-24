@@ -224,20 +224,23 @@ Matrix4x4 GeneratePerspective(float FoVRadians, float Width, float Height, float
 
 Matrix4x4 GenerateView(Vector3 CameraPosition, Vector3 CameraTarget, Vector3 CameraUp);
 
+uint32_t getMemTypeIndex(vk::PhysicalDevice& physicalDevice, uint32_t typeFilter, vk::MemoryPropertyFlags properties);
+
 //Define vertex with position and colour;
 struct Vertex
 {
 	Vector3 pos;
 	Vector4 colour;
 	Vertex(Vector3 pos, Vector4 col) : pos(pos), colour(col) {}
+
 };
 
 //Define our triangle in object space x = [-1,1], y = [-1,1]
-Vertex Triangle[] =
+vector<Vertex> Triangle =
 {
-	Vertex(Vector3(-0.5, -0.5, 0.0), Vector4(1.0, 0.0, 0.0, 1.0)),
-	Vertex(Vector3(0.0, 0.5, 0.0), Vector4(0.0, 1.0, 0.0, 1.0)),
-	Vertex(Vector3(-0.5, 0.5, 0.0), Vector4(0.0, 0.0, 1.0, 1.0)),
+	Vertex(Vector3(0.0, -0.5, 0.0), Vector4(1.0, 0.0, 0.0, 1.0)),
+	Vertex(Vector3(0.5, 0.5, 0.0), Vector4(0.0, 1.0, 0.0, 1.0)),
+	Vertex(Vector3(-0.5, 0.5, 0.0), Vector4(0.0, 0.0, 1.0, 0.0)),
 };
 
 HWND CreateAppWindow(HINSTANCE instance);
@@ -472,7 +475,7 @@ int main(int argc, char** argv)
 		cout << "_____________________________________" << endl;
 
 	}
-	
+
 	vk::MemoryAllocateInfo depthBufferAllocateInfo =
 		vk::MemoryAllocateInfo()
 		.setAllocationSize(depthBufferMemReqs.size)
@@ -520,10 +523,31 @@ int main(int argc, char** argv)
 		.setPName("main")
 	};
 
+	vk::VertexInputBindingDescription vertBindingDesc =
+		vk::VertexInputBindingDescription()
+		.setBinding(0)
+		.setStride(sizeof(Vertex))
+		.setInputRate(vk::VertexInputRate::eVertex);
+
+	vk::VertexInputAttributeDescription vertexInputAttrs[] = {
+		vk::VertexInputAttributeDescription()
+		.setBinding(0)
+		.setLocation(0)
+		.setFormat(vk::Format::eR32G32B32Sfloat)
+		.setOffset(offsetof(Vertex, Vertex::pos)),
+		vk::VertexInputAttributeDescription()
+		.setBinding(0)
+		.setLocation(1)
+		.setFormat(vk::Format::eR32G32B32A32Sfloat)
+		.setOffset(offsetof(Vertex, Vertex::colour))
+	};
+
 	vk::PipelineVertexInputStateCreateInfo vertexInputCreateInfo =
 		vk::PipelineVertexInputStateCreateInfo()
-		.setVertexBindingDescriptionCount(0)
-		.setVertexAttributeDescriptionCount(0);
+		.setVertexBindingDescriptionCount(1)
+		.setPVertexBindingDescriptions(&vertBindingDesc)
+		.setVertexAttributeDescriptionCount(2)
+		.setPVertexAttributeDescriptions(vertexInputAttrs);
 
 	vk::PipelineInputAssemblyStateCreateInfo inputAssemblyCreateInfo =
 		vk::PipelineInputAssemblyStateCreateInfo()
@@ -697,6 +721,43 @@ int main(int argc, char** argv)
 
 	vector<vk::CommandBuffer> vulkanCommandBuffersArray = vulkanDevice.allocateCommandBuffers(commandBufferInfo);
 
+	Matrix4x4 ProjectionMatrix = GeneratePerspective(90.0f, surfaceCapabilities.minImageExtent.width, surfaceCapabilities.minImageExtent.height, 1.0f, 100.0f);
+	Matrix4x4 ViewMatrix = GenerateView(Vector3(-5.0f, 3.0f, -10.0f), Vector3(0.0f, 0.0f, 0.0f), Vector3(0.0f, -1.0f, 0.0f));
+	Matrix4x4 ClipMatrix = Matrix4x4(
+		1.0f, 0.0f, 0.0f, 0.0f,
+		0.0f, -1.0f, 0.0f, 0.0f,
+		0.0f, 0.0f, 0.5f, 0.0f,
+		0.0f, 0.0f, 0.5f, 1.0f
+	);
+
+	//Setting up a vertex buffer for consumption by draw
+	uint32_t gfxQueues[] = { gfxQueueIndex };
+
+	vk::BufferCreateInfo vertexBufferInfo =
+		vk::BufferCreateInfo()
+		.setUsage(vk::BufferUsageFlagBits::eVertexBuffer)
+		.setSize(sizeof(Vertex) * Triangle.size())
+		.setPQueueFamilyIndices(gfxQueues)
+		.setQueueFamilyIndexCount(1)
+		.setSharingMode(vk::SharingMode::eExclusive);
+
+	vk::Buffer vertexBuffer = vulkanDevice.createBuffer(vertexBufferInfo);
+
+	vk::MemoryRequirements vertBufferMemReqs = vulkanDevice.getBufferMemoryRequirements(vertexBuffer);
+	uint32_t vertBufferMemoryIndex = getMemTypeIndex(vulkanPhyDevice, vertBufferMemReqs.memoryTypeBits, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+
+	vk::MemoryAllocateInfo vertBufferAllocateInfo =
+		vk::MemoryAllocateInfo()
+		.setAllocationSize(vertBufferMemReqs.size)
+		.setMemoryTypeIndex(vertBufferMemoryIndex);
+
+	vk::DeviceMemory vertexBufferMemory = vulkanDevice.allocateMemory(vertBufferAllocateInfo);
+	vulkanDevice.bindBufferMemory(vertexBuffer, vertexBufferMemory, 0);
+	void* vertMemoryPtr;
+	vulkanDevice.mapMemory(vertexBufferMemory, 0, vertexBufferInfo.size, vk::MemoryMapFlagBits(0), &vertMemoryPtr);
+	memcpy(vertMemoryPtr, Triangle.data(), (size_t)vertexBufferInfo.size);
+	vulkanDevice.unmapMemory(vertexBufferMemory);
+
 	//Record render sequence to command buffer
 	for (int i = 0; i < vulkanCommandBuffersArray.size(); i++) {
 		auto buffer = vulkanCommandBuffersArray[i];
@@ -719,7 +780,13 @@ int main(int argc, char** argv)
 
 		buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, vulkanGraphicsPipeline);
 
-		buffer.draw(3, 1, 0, 0);
+		vk::ArrayProxy<const vk::Buffer> vertexBuffers = vk::ArrayProxy<const vk::Buffer>(1, &vertexBuffer);
+		vk::DeviceSize offsets[] = { 0 };
+		vk::ArrayProxy<const vk::DeviceSize> offsetsProxy = vk::ArrayProxy<const vk::DeviceSize>(1, offsets);
+
+		buffer.bindVertexBuffers(0, vertexBuffers, offsetsProxy);
+
+		buffer.draw(static_cast<uint32_t>(Triangle.size()), 1, 0, 0);
 
 		buffer.endRenderPass();
 
@@ -730,15 +797,6 @@ int main(int argc, char** argv)
 	vk::SemaphoreCreateInfo semaphoreCreateInfo = vk::SemaphoreCreateInfo();
 	vk::Semaphore imageAvailableSemaphore = vulkanDevice.createSemaphore(semaphoreCreateInfo);
 	vk::Semaphore renderFinishedSemaphore = vulkanDevice.createSemaphore(semaphoreCreateInfo);
-
-	Matrix4x4 ProjectionMatrix = GeneratePerspective(90.0f, surfaceCapabilities.minImageExtent.width, surfaceCapabilities.minImageExtent.height, 1.0f, 100.0f);
-	Matrix4x4 ViewMatrix = GenerateView(Vector3(-5.0f, 3.0f, -10.0f), Vector3(0.0f, 0.0f, 0.0f), Vector3(0.0f, -1.0f, 0.0f));
-	Matrix4x4 ClipMatrix = Matrix4x4(
-		1.0f, 0.0f, 0.0f, 0.0f,
-		0.0f, -1.0f, 0.0f, 0.0f,
-		0.0f, 0.0f, 0.5f, 0.0f,
-		0.0f, 0.0f, 0.5f, 1.0f
-	);
 
 	MSG message = { 0 };
 	while (message.message != WM_QUIT)
@@ -785,6 +843,8 @@ int main(int argc, char** argv)
 		vulkanDevice.waitIdle();
 	}
 
+	vulkanDevice.destroyBuffer(vertexBuffer);
+
 	return 0;
 }
 
@@ -827,6 +887,18 @@ Matrix4x4 GenerateView(Vector3 CameraPosition, Vector3 CameraTarget, Vector3 Cam
 
 
 	return ViewMatrix;
+}
+
+uint32_t getMemTypeIndex(vk::PhysicalDevice& physicalDevice, uint32_t typeFilter, vk::MemoryPropertyFlags properties)
+{
+	vk::PhysicalDeviceMemoryProperties memProperties = physicalDevice.getMemoryProperties();
+	for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++) {
+		if ((typeFilter & (1 << i)) && (memProperties.memoryTypes[i].propertyFlags & properties) == properties) {
+			return i;
+		}
+	}
+
+	throw "Unable to find usable device memory for buffer";
 }
 
 HWND CreateAppWindow(HINSTANCE instance)
