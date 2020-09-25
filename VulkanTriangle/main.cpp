@@ -293,9 +293,9 @@ int main(int argc, char** argv)
 
 	vk::InstanceCreateInfo instanceInfo = vk::InstanceCreateInfo()
 		.setPApplicationInfo(&appInfo)
-		.setEnabledLayerCount(ValidationLayers.size())
+		.setEnabledLayerCount((uint32_t)ValidationLayers.size())
 		.setPpEnabledLayerNames(ValidationLayers.data())
-		.setEnabledExtensionCount(surfaceExtensionNames.size())
+		.setEnabledExtensionCount((uint32_t)surfaceExtensionNames.size())
 		.setPpEnabledExtensionNames(surfaceExtensionNames.data());
 
 	vk::Instance vulkanInstance = vk::createInstance(instanceInfo);
@@ -351,11 +351,11 @@ int main(int argc, char** argv)
 	//Allocate device creation info structure and populate
 	vk::DeviceCreateInfo deviceCreInfo =
 		vk::DeviceCreateInfo()
-		.setQueueCreateInfoCount(queueCreateInfos.size())
+		.setQueueCreateInfoCount((uint32_t)queueCreateInfos.size())
 		.setPQueueCreateInfos(queueCreateInfos.data())
-		.setEnabledExtensionCount(phyDevExtNames.size())
+		.setEnabledExtensionCount((uint32_t)phyDevExtNames.size())
 		.setPpEnabledExtensionNames(phyDevExtNames.data())
-		.setEnabledLayerCount(ValidationLayers.size())
+		.setEnabledLayerCount((uint32_t)ValidationLayers.size())
 		.setPpEnabledLayerNames(ValidationLayers.data())
 		.setPEnabledFeatures(&(vulkanPhyDevice.getFeatures()));
 
@@ -412,7 +412,7 @@ int main(int argc, char** argv)
 		.setImageExtent(surfaceCapabilities.minImageExtent)
 		.setPreTransform(surfaceCapabilities.currentTransform)
 		.setPresentMode(surfacePresentModes[3])
-		.setQueueFamilyIndexCount(presentGfxQueueIndex.size())
+		.setQueueFamilyIndexCount((uint32_t)presentGfxQueueIndex.size())
 		.setPQueueFamilyIndices(presentGfxQueueIndex.data())
 		.setFlags(vk::SwapchainCreateFlagsKHR())
 		.setImageArrayLayers(surfaceCapabilities.maxImageArrayLayers)
@@ -481,7 +481,7 @@ int main(int argc, char** argv)
 
 	int deviceLocalMemIdx = 0;
 
-	for (int memIdx = 0; memIdx < memProps.memoryTypeCount; memIdx++)
+	for (uint32_t memIdx = 0; memIdx < memProps.memoryTypeCount; memIdx++)
 	{
 		auto memProp = memProps.memoryTypes[memIdx];
 		cout << "Memory type: " << memIdx << endl
@@ -580,8 +580,8 @@ int main(int argc, char** argv)
 	vk::Viewport viewport = vk::Viewport()
 		.setX(0.0f)
 		.setY(0.0f)
-		.setWidth(surfaceCapabilities.minImageExtent.width)
-		.setHeight(surfaceCapabilities.minImageExtent.height)
+		.setWidth((float)surfaceCapabilities.minImageExtent.width)
+		.setHeight((float)surfaceCapabilities.minImageExtent.height)
 		.setMinDepth(0.0f)
 		.setMaxDepth(1.0f);
 
@@ -738,13 +738,13 @@ int main(int argc, char** argv)
 
 	vk::CommandBufferAllocateInfo commandBufferInfo =
 		vk::CommandBufferAllocateInfo()
-		.setCommandBufferCount(swapChainFrameBuffers.size())
+		.setCommandBufferCount((uint32_t)swapChainFrameBuffers.size())
 		.setCommandPool(vulkanCommandPool)
 		.setLevel(vk::CommandBufferLevel::ePrimary);
 
 	vector<vk::CommandBuffer> vulkanCommandBuffersArray = vulkanDevice.allocateCommandBuffers(commandBufferInfo);
 
-	Matrix4x4 ProjectionMatrix = GeneratePerspective(90.0f, surfaceCapabilities.minImageExtent.width, surfaceCapabilities.minImageExtent.height, 1.0f, 100.0f);
+	Matrix4x4 ProjectionMatrix = GeneratePerspective(90.0f, (float)surfaceCapabilities.minImageExtent.width, (float)surfaceCapabilities.minImageExtent.height, 1.0f, 100.0f);
 	Matrix4x4 ViewMatrix = GenerateView(Vector3(-5.0f, 3.0f, -10.0f), Vector3(0.0f, 0.0f, 0.0f), Vector3(0.0f, -1.0f, 0.0f));
 	Matrix4x4 ClipMatrix = Matrix4x4(
 		1.0f, 0.0f, 0.0f, 0.0f,
@@ -814,7 +814,7 @@ int main(int argc, char** argv)
 		buffer.bindVertexBuffers(0, vertexBuffers, offsetsProxy);
 		buffer.bindIndexBuffer(indexBuffer, 0, vk::IndexType::eUint16);
 
-		buffer.drawIndexed(simpleRect.indices.size(), 1, 0, 0, 0);
+		buffer.drawIndexed((uint32_t)simpleRect.indices.size(), 1, 0, 0, 0);
 
 		buffer.endRenderPass();
 
