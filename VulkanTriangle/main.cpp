@@ -5,12 +5,14 @@
 #include <sstream>
 #include <fstream>
 #include <filesystem>
+#include <tuple>
 
 using std::cout;
 using std::endl;
 using std::vector;
 using std::string;
 using std::ifstream;
+using std::tuple;
 namespace fs = std::filesystem;
 
 const static float Pi = 3.14159265359f;
@@ -224,7 +226,7 @@ Matrix4x4 GeneratePerspective(float FoVRadians, float Width, float Height, float
 
 Matrix4x4 GenerateView(Vector3 CameraPosition, Vector3 CameraTarget, Vector3 CameraUp);
 
-uint32_t getMemTypeIndex(vk::PhysicalDevice& physicalDevice, uint32_t typeFilter, vk::MemoryPropertyFlags properties);
+uint32_t getMemTypeIndex(const vk::PhysicalDevice& physicalDevice, uint32_t typeFilter, vk::MemoryPropertyFlags properties);
 
 //Define vertex with position and colour;
 struct Vertex
@@ -247,6 +249,9 @@ HWND CreateAppWindow(HINSTANCE instance);
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 
 std::string GetVkMemTypeStr(vk::MemoryPropertyFlags MemPropFlag);
+tuple<vk::Buffer, vk::DeviceMemory> createBuffer(const vk::Device& device, const vk::PhysicalDevice& physicalDevice, vk::DeviceSize size, vk::BufferUsageFlags usageFlags, vk::MemoryPropertyFlags propertyFlags);
+
+vk::Fence copyBuffer(const vk::Device& device, const vk::Queue& commandQueue, const vk::CommandPool& commandPool, vk::Buffer srcBuffer, vk::Buffer dstBuffer, vk::DeviceSize size);
 
 vector<char> LoadShader(string);
 vk::ShaderModule CreateModuleForShader(vk::Device& device, vector<char>& shaderData);
@@ -730,33 +735,25 @@ int main(int argc, char** argv)
 		0.0f, 0.0f, 0.5f, 1.0f
 	);
 
-	//Setting up a vertex buffer for consumption by draw
-	uint32_t gfxQueues[] = { gfxQueueIndex };
+	//Setting up a vertex buffer for consumption by draw, using a host 
 
-	vk::BufferCreateInfo vertexBufferInfo =
-		vk::BufferCreateInfo()
-		.setUsage(vk::BufferUsageFlagBits::eVertexBuffer)
-		.setSize(sizeof(Vertex) * Triangle.size())
-		.setPQueueFamilyIndices(gfxQueues)
-		.setQueueFamilyIndexCount(1)
-		.setSharingMode(vk::SharingMode::eExclusive);
+	vk::DeviceSize meshSize = sizeof(Vertex) * Triangle.size();
+	auto [stagingBuffer, stagingBufferMemory] = createBuffer(vulkanDevice, vulkanPhyDevice,
+		meshSize, vk::BufferUsageFlagBits::eTransferSrc, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
 
-	vk::Buffer vertexBuffer = vulkanDevice.createBuffer(vertexBufferInfo);
+	void* stagingMemoryPtr;
+	vulkanDevice.mapMemory(stagingBufferMemory, 0, meshSize, vk::MemoryMapFlagBits(0), &stagingMemoryPtr);
+	memcpy(stagingMemoryPtr, Triangle.data(), (size_t)meshSize);
+	vulkanDevice.unmapMemory(stagingBufferMemory);
 
-	vk::MemoryRequirements vertBufferMemReqs = vulkanDevice.getBufferMemoryRequirements(vertexBuffer);
-	uint32_t vertBufferMemoryIndex = getMemTypeIndex(vulkanPhyDevice, vertBufferMemReqs.memoryTypeBits, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+	auto [vertexBuffer, vertexBufferMemory] = createBuffer(vulkanDevice, vulkanPhyDevice,
+		meshSize, vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst, vk::MemoryPropertyFlagBits::eDeviceLocal);
 
-	vk::MemoryAllocateInfo vertBufferAllocateInfo =
-		vk::MemoryAllocateInfo()
-		.setAllocationSize(vertBufferMemReqs.size)
-		.setMemoryTypeIndex(vertBufferMemoryIndex);
+	vector<vk::Fence> resourceFences;
+	
+	resourceFences.push_back(copyBuffer(vulkanDevice, gfxQueue, vulkanCommandPool, stagingBuffer, vertexBuffer, meshSize));
 
-	vk::DeviceMemory vertexBufferMemory = vulkanDevice.allocateMemory(vertBufferAllocateInfo);
-	vulkanDevice.bindBufferMemory(vertexBuffer, vertexBufferMemory, 0);
-	void* vertMemoryPtr;
-	vulkanDevice.mapMemory(vertexBufferMemory, 0, vertexBufferInfo.size, vk::MemoryMapFlagBits(0), &vertMemoryPtr);
-	memcpy(vertMemoryPtr, Triangle.data(), (size_t)vertexBufferInfo.size);
-	vulkanDevice.unmapMemory(vertexBufferMemory);
+	vulkanDevice.waitForFences(resourceFences, true, 1000000);
 
 	//Record render sequence to command buffer
 	for (int i = 0; i < vulkanCommandBuffersArray.size(); i++) {
@@ -889,7 +886,7 @@ Matrix4x4 GenerateView(Vector3 CameraPosition, Vector3 CameraTarget, Vector3 Cam
 	return ViewMatrix;
 }
 
-uint32_t getMemTypeIndex(vk::PhysicalDevice& physicalDevice, uint32_t typeFilter, vk::MemoryPropertyFlags properties)
+uint32_t getMemTypeIndex(const vk::PhysicalDevice& physicalDevice, uint32_t typeFilter, vk::MemoryPropertyFlags properties)
 {
 	vk::PhysicalDeviceMemoryProperties memProperties = physicalDevice.getMemoryProperties();
 	for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++) {
@@ -944,6 +941,78 @@ std::string GetVkMemTypeStr(vk::MemoryPropertyFlags MemPropFlag)
 	out << vk::to_string(MemPropFlag);
 
 	return out.str();
+}
+
+tuple<vk::Buffer, vk::DeviceMemory> createBuffer(const vk::Device& device, const vk::PhysicalDevice& physicalDevice, vk::DeviceSize size, vk::BufferUsageFlags usageFlags, vk::MemoryPropertyFlags propertyFlags)
+{
+	vk::BufferCreateInfo bufferCreateInfo =
+		vk::BufferCreateInfo()
+		.setSize(size)
+		.setUsage(usageFlags)
+		.setSharingMode(vk::SharingMode::eExclusive);
+
+	vk::Buffer buffer = device.createBuffer(bufferCreateInfo);
+
+	vk::MemoryRequirements memReqs = device.getBufferMemoryRequirements(buffer);
+
+	vk::MemoryAllocateInfo mAllocInfo =
+		vk::MemoryAllocateInfo()
+		.setAllocationSize(memReqs.size)
+		.setMemoryTypeIndex(getMemTypeIndex(physicalDevice, memReqs.memoryTypeBits, propertyFlags));
+
+	vk::DeviceMemory bufferMemory = device.allocateMemory(mAllocInfo);
+
+	device.bindBufferMemory(buffer, bufferMemory, 0);
+
+	return tuple(buffer, bufferMemory);
+}
+
+vk::Fence copyBuffer(const vk::Device& device, const vk::Queue& commandQueue, const vk::CommandPool& commandPool, vk::Buffer srcBuffer, vk::Buffer dstBuffer, vk::DeviceSize size)
+{
+	vk::CommandBufferAllocateInfo allocInfo =
+		vk::CommandBufferAllocateInfo()
+		.setLevel(vk::CommandBufferLevel::ePrimary)
+		.setCommandPool(commandPool)
+		.setCommandBufferCount(1);
+
+	vector<vk::CommandBuffer> copyCommandBufferResult = device.allocateCommandBuffers(allocInfo);
+	
+	if (copyCommandBufferResult.size() != 1) {
+		device.freeCommandBuffers(commandPool, copyCommandBufferResult);
+		throw std::runtime_error("Incorrect number of command buffers created, something has gone wierd");
+	}
+
+	vk::CommandBuffer copyCommandBuffer = copyCommandBufferResult[0];
+
+	vk::CommandBufferBeginInfo copyBeginInfo =
+		vk::CommandBufferBeginInfo()
+		.setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit);
+
+	copyCommandBuffer.begin(copyBeginInfo);
+
+	vk::BufferCopy copyMemInfo =
+		vk::BufferCopy()
+		.setSrcOffset(0)
+		.setDstOffset(0)
+		.setSize(size);
+
+	copyCommandBuffer.copyBuffer(srcBuffer, dstBuffer, copyMemInfo);
+
+	copyCommandBuffer.end();
+
+	vk::SubmitInfo copySubmitInfo =
+		vk::SubmitInfo()
+		.setCommandBufferCount(1)
+		.setPCommandBuffers(&copyCommandBuffer);
+	
+	vk::FenceCreateInfo fenceInfo =
+		vk::FenceCreateInfo();
+
+	vk::Fence copyFence = device.createFence(fenceInfo);
+
+	commandQueue.submit(copySubmitInfo, copyFence);
+
+	return copyFence;
 }
 
 vector<char> LoadShader(string shaderPath)
