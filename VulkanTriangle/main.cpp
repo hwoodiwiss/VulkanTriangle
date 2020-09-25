@@ -237,6 +237,13 @@ struct Vertex
 
 };
 
+struct SimpleMesh
+{
+	std::vector<Vertex> vertices;
+	std::vector<uint16_t> indices;
+	SimpleMesh(std::vector<Vertex> vertices, std::vector<uint16_t> indices) : vertices(vertices), indices(indices) {}
+};
+
 //Define our triangle in object space x = [-1,1], y = [-1,1]
 vector<Vertex> Triangle =
 {
@@ -244,6 +251,17 @@ vector<Vertex> Triangle =
 	Vertex(Vector3(0.5, 0.5, 0.0), Vector4(0.0, 1.0, 0.0, 1.0)),
 	Vertex(Vector3(-0.5, 0.5, 0.0), Vector4(0.0, 0.0, 1.0, 0.0)),
 };
+
+SimpleMesh simpleRect = SimpleMesh(
+	{
+		Vertex(Vector3(-0.5, -0.5, 0.0), Vector4(1.0, 1.0, 0.0, 1.0)),
+		Vertex(Vector3(0.5, -0.5, 0.0), Vector4(0.0, 1.0, 0.0, 1.0)),
+		Vertex(Vector3(0.5, 0.5, 0.0), Vector4(0.0, 0.0, 1.0, 1.0)),
+		Vertex(Vector3(-0.5, 0.5, 0.0), Vector4(1.0, 0.0, 1.0, 1.0))
+	}, 
+	{
+		0, 1, 2, 2, 3, 0
+	});
 
 HWND CreateAppWindow(HINSTANCE instance);
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
@@ -737,21 +755,33 @@ int main(int argc, char** argv)
 
 	//Setting up a vertex buffer for consumption by draw, using a host 
 
-	vk::DeviceSize meshSize = sizeof(Vertex) * Triangle.size();
-	auto [stagingBuffer, stagingBufferMemory] = createBuffer(vulkanDevice, vulkanPhyDevice,
-		meshSize, vk::BufferUsageFlagBits::eTransferSrc, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+	vk::DeviceSize meshVertSize = sizeof(Vertex) * simpleRect.vertices.size();
+	vk::DeviceSize meshIndicesSize = sizeof(uint16_t) * simpleRect.indices.size();
+	auto [vertStagingBuffer, vertStagingBufferMemory] = createBuffer(vulkanDevice, vulkanPhyDevice,
+		meshVertSize, vk::BufferUsageFlagBits::eTransferSrc, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
 
-	void* stagingMemoryPtr;
-	vulkanDevice.mapMemory(stagingBufferMemory, 0, meshSize, vk::MemoryMapFlagBits(0), &stagingMemoryPtr);
-	memcpy(stagingMemoryPtr, Triangle.data(), (size_t)meshSize);
-	vulkanDevice.unmapMemory(stagingBufferMemory);
+	void* vertStagingMemoryPtr;
+	vulkanDevice.mapMemory(vertStagingBufferMemory, 0, meshVertSize, vk::MemoryMapFlagBits(0), &vertStagingMemoryPtr);
+	memcpy(vertStagingMemoryPtr, simpleRect.vertices.data(), (size_t)meshVertSize);
+	vulkanDevice.unmapMemory(vertStagingBufferMemory);
 
 	auto [vertexBuffer, vertexBufferMemory] = createBuffer(vulkanDevice, vulkanPhyDevice,
-		meshSize, vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst, vk::MemoryPropertyFlagBits::eDeviceLocal);
+		meshVertSize, vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst, vk::MemoryPropertyFlagBits::eDeviceLocal);
 
+	auto [indexStagingBuffer, indexStagingBufferMemory] = createBuffer(vulkanDevice, vulkanPhyDevice,
+		meshIndicesSize, vk::BufferUsageFlagBits::eTransferSrc, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
 	vector<vk::Fence> resourceFences;
-	
-	resourceFences.push_back(copyBuffer(vulkanDevice, gfxQueue, vulkanCommandPool, stagingBuffer, vertexBuffer, meshSize));
+
+	void* indStagingMemoryPtr;
+	vulkanDevice.mapMemory(indexStagingBufferMemory, 0, meshVertSize, vk::MemoryMapFlagBits(0), &indStagingMemoryPtr);
+	memcpy(indStagingMemoryPtr, simpleRect.indices.data(), (size_t)meshIndicesSize);
+	vulkanDevice.unmapMemory(indexStagingBufferMemory);
+
+	auto [indexBuffer, indexBufferMemory] = createBuffer(vulkanDevice, vulkanPhyDevice,
+		meshVertSize, vk::BufferUsageFlagBits::eIndexBuffer | vk::BufferUsageFlagBits::eTransferDst, vk::MemoryPropertyFlagBits::eDeviceLocal);
+
+	resourceFences.push_back(copyBuffer(vulkanDevice, gfxQueue, vulkanCommandPool, vertStagingBuffer, vertexBuffer, meshVertSize));
+	resourceFences.push_back(copyBuffer(vulkanDevice, gfxQueue, vulkanCommandPool, indexStagingBuffer, indexBuffer, meshIndicesSize));
 
 	vulkanDevice.waitForFences(resourceFences, true, 1000000);
 
@@ -782,8 +812,9 @@ int main(int argc, char** argv)
 		vk::ArrayProxy<const vk::DeviceSize> offsetsProxy = vk::ArrayProxy<const vk::DeviceSize>(1, offsets);
 
 		buffer.bindVertexBuffers(0, vertexBuffers, offsetsProxy);
+		buffer.bindIndexBuffer(indexBuffer, 0, vk::IndexType::eUint16);
 
-		buffer.draw(static_cast<uint32_t>(Triangle.size()), 1, 0, 0);
+		buffer.drawIndexed(simpleRect.indices.size(), 1, 0, 0, 0);
 
 		buffer.endRenderPass();
 
@@ -976,7 +1007,7 @@ vk::Fence copyBuffer(const vk::Device& device, const vk::Queue& commandQueue, co
 		.setCommandBufferCount(1);
 
 	vector<vk::CommandBuffer> copyCommandBufferResult = device.allocateCommandBuffers(allocInfo);
-	
+
 	if (copyCommandBufferResult.size() != 1) {
 		device.freeCommandBuffers(commandPool, copyCommandBufferResult);
 		throw std::runtime_error("Incorrect number of command buffers created, something has gone wierd");
@@ -1004,7 +1035,7 @@ vk::Fence copyBuffer(const vk::Device& device, const vk::Queue& commandQueue, co
 		vk::SubmitInfo()
 		.setCommandBufferCount(1)
 		.setPCommandBuffers(&copyCommandBuffer);
-	
+
 	vk::FenceCreateInfo fenceInfo =
 		vk::FenceCreateInfo();
 
