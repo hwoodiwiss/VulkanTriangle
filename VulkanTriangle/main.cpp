@@ -1,4 +1,5 @@
 #define VK_USE_PLATFORM_WIN32_KHR 1
+#define USE_GLM 1
 #include <vulkan/vulkan.hpp>
 #include <iostream>
 #include <vector>
@@ -6,6 +7,10 @@
 #include <fstream>
 #include <filesystem>
 #include <tuple>
+#ifdef USE_GLM
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#endif
 
 using std::cout;
 using std::endl;
@@ -16,6 +21,8 @@ using std::tuple;
 namespace fs = std::filesystem;
 
 const static float Pi = 3.14159265359f;
+
+struct UniformBufferObject;
 
 float DegreesToRadians(float Degrees)
 {
@@ -236,6 +243,22 @@ struct Vertex
 	Vertex(Vector3 pos, Vector4 col) : pos(pos), colour(col) {}
 
 };
+
+#ifdef USE_GLM
+struct UniformBufferObject {
+	glm::mat4 model;
+	glm::mat4 view;
+	glm::mat4 projection;
+	UniformBufferObject(): model(0), view(0), projection(0) {}
+};
+#else
+struct UniformBufferObject {
+	Matrix4x4 model;
+	Matrix4x4 view;
+	Matrix4x4 projection;
+	UniformBufferObject() : model(0), view(0), projection(0) {}
+};
+#endif
 
 struct SimpleMesh
 {
@@ -534,6 +557,43 @@ int main(int argc, char** argv)
 	auto vertShaderModule = CreateModuleForShader(vulkanDevice, vertShader);
 	auto fragShaderModule = CreateModuleForShader(vulkanDevice, fragShader);
 
+
+	Matrix4x4 ModelMatrix = Matrix4x4::Identity();
+	Matrix4x4 ProjectionMatrix = GeneratePerspective(90.0f, (float)surfaceCapabilities.minImageExtent.width, (float)surfaceCapabilities.minImageExtent.height, 1.0f, 100.0f);
+	Matrix4x4 ViewMatrix = GenerateView(Vector3(2.0f, 2.0f, 2.0f), Vector3(0.0f, 0.0f, 0.0f), Vector3(0.0f, 0.0f, 1.0f));
+	Matrix4x4 ClipMatrix = Matrix4x4(
+		1.0f, 0.0f, 0.0f, 0.0f,
+		0.0f, -1.0f, 0.0f, 0.0f,
+		0.0f, 0.0f, 0.5f, 0.0f,
+		0.0f, 0.0f, 0.5f, 1.0f
+	);
+
+	//Setup and create uniform buffer
+	UniformBufferObject ubo;
+#ifdef USE_GLM
+	ubo.model = glm::mat4(1.0f);
+	ubo.projection = glm::perspective(glm::radians(80.0f), (float)surfaceCapabilities.minImageExtent.width / (float)surfaceCapabilities.minImageExtent.height, 0.1f, 100.0f);
+	ubo.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+	ubo.projection[1][1] *= -1;
+#else
+	ubo.model = Matrix4x4(1.0f);
+	ubo.projection = GeneratePerspective(90.0f, (float)surfaceCapabilities.minImageExtent.width, (float)surfaceCapabilities.minImageExtent.height, 0.1f, 100.0f);
+	ubo.view = GenerateView(Vector3(2.0f, 2.0f, 2.0f), Vector3(0.0f, 0.0f, 0.0f), Vector3(0.0f, 0.0f, 1.0f));
+	ubo.projection.xb *= -1;
+#endif
+
+	vk::DeviceSize uboSize = sizeof(UniformBufferObject);
+	auto uniformBuffers = std::vector<std::tuple<vk::Buffer, vk::DeviceMemory>>(swapChainImages.size());
+
+	for (uint32_t i = 0; i < swapChainImages.size(); i++) {
+		uniformBuffers[i] = createBuffer(vulkanDevice, vulkanPhyDevice, uboSize, vk::BufferUsageFlagBits::eUniformBuffer, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+		const auto& [uniformBuffer, uniformBufferMemory] = uniformBuffers[i];
+		void* uniformBufferMemPtr;
+		vulkanDevice.mapMemory(uniformBufferMemory, 0, sizeof(ubo), vk::MemoryMapFlagBits(0), &uniformBufferMemPtr);
+		memcpy(uniformBufferMemPtr, &ubo, sizeof(ubo));
+		vulkanDevice.unmapMemory(uniformBufferMemory);
+	}
+
 	//Setup pipeline stages
 	auto pipelineShaderStages = vector<vk::PipelineShaderStageCreateInfo>{
 		vk::PipelineShaderStageCreateInfo()
@@ -601,7 +661,7 @@ int main(int argc, char** argv)
 		.setPolygonMode(vk::PolygonMode::eFill)
 		.setLineWidth(1.0f)
 		.setCullMode(vk::CullModeFlagBits::eBack)
-		.setFrontFace(vk::FrontFace::eClockwise)
+		.setFrontFace(vk::FrontFace::eCounterClockwise)
 		.setDepthBiasEnable(false)
 		.setDepthBiasConstantFactor(0.0f)
 		.setDepthBiasClamp(0.0f)
@@ -645,6 +705,48 @@ int main(int argc, char** argv)
 		.setPBindings(&vulkanDescriptorSetLayoutBinding);
 
 	vk::DescriptorSetLayout vulkanDescriptorSetLayout = vulkanDevice.createDescriptorSetLayout(vulkanDescSetLayoutInfo);
+
+	vk::DescriptorPoolSize descPoolSize =
+		vk::DescriptorPoolSize()
+		.setDescriptorCount((uint32_t)swapChainImages.size());
+
+	vk::DescriptorPoolCreateInfo descPoolCreateInfo =
+		vk::DescriptorPoolCreateInfo()
+		.setPoolSizeCount(1)
+		.setPPoolSizes(&descPoolSize)
+		.setMaxSets((uint32_t)swapChainImages.size());
+
+	vk::DescriptorPool descriptorPool = vulkanDevice.createDescriptorPool(descPoolCreateInfo);
+
+	vector<vk::DescriptorSetLayout> descriptorSetLayouts = vector<vk::DescriptorSetLayout>(swapChainImages.size(), vulkanDescriptorSetLayout); 
+
+	vk::DescriptorSetAllocateInfo descSetAllocInfo =
+		vk::DescriptorSetAllocateInfo()
+		.setDescriptorPool(descriptorPool)
+		.setDescriptorSetCount((uint32_t)swapChainImages.size())
+		.setPSetLayouts(descriptorSetLayouts.data());
+
+	vector<vk::DescriptorSet> descriptorSets = vulkanDevice.allocateDescriptorSets(descSetAllocInfo);
+
+	for (uint32_t i = 0; i < swapChainImages.size(); i++) {
+		const auto& [uniformBuffer, uniformBufferMemory] = uniformBuffers[i];
+		vk::DescriptorBufferInfo bufferInfo =
+			vk::DescriptorBufferInfo()
+			.setBuffer(uniformBuffer)
+			.setOffset(0)
+			.setRange(sizeof(UniformBufferObject));
+
+		vk::WriteDescriptorSet descriptorWriteInfo =
+			vk::WriteDescriptorSet()
+			.setDstSet(descriptorSets[i])
+			.setDstBinding(0)
+			.setDstArrayElement(0)
+			.setDescriptorType(vk::DescriptorType::eUniformBuffer)
+			.setDescriptorCount(1)
+			.setPBufferInfo(&bufferInfo);
+
+		vulkanDevice.updateDescriptorSets(1, &descriptorWriteInfo, 0, nullptr);
+	}
 
 	vk::PipelineLayoutCreateInfo vulkanPipelineLayoutInfo =
 		vk::PipelineLayoutCreateInfo()
@@ -744,16 +846,8 @@ int main(int argc, char** argv)
 
 	vector<vk::CommandBuffer> vulkanCommandBuffersArray = vulkanDevice.allocateCommandBuffers(commandBufferInfo);
 
-	Matrix4x4 ProjectionMatrix = GeneratePerspective(90.0f, (float)surfaceCapabilities.minImageExtent.width, (float)surfaceCapabilities.minImageExtent.height, 1.0f, 100.0f);
-	Matrix4x4 ViewMatrix = GenerateView(Vector3(-5.0f, 3.0f, -10.0f), Vector3(0.0f, 0.0f, 0.0f), Vector3(0.0f, -1.0f, 0.0f));
-	Matrix4x4 ClipMatrix = Matrix4x4(
-		1.0f, 0.0f, 0.0f, 0.0f,
-		0.0f, -1.0f, 0.0f, 0.0f,
-		0.0f, 0.0f, 0.5f, 0.0f,
-		0.0f, 0.0f, 0.5f, 1.0f
-	);
 
-	//Setting up a vertex buffer for consumption by draw, using a host 
+	//Setting up a vertex and index buffer for consumption by draw, using a host visible staging buffer first
 
 	vk::DeviceSize meshVertSize = sizeof(Vertex) * simpleRect.vertices.size();
 	vk::DeviceSize meshIndicesSize = sizeof(uint16_t) * simpleRect.indices.size();
@@ -785,6 +879,8 @@ int main(int argc, char** argv)
 
 	vulkanDevice.waitForFences(resourceFences, true, 1000000);
 
+
+
 	//Record render sequence to command buffer
 	for (int i = 0; i < vulkanCommandBuffersArray.size(); i++) {
 		auto buffer = vulkanCommandBuffersArray[i];
@@ -810,6 +906,8 @@ int main(int argc, char** argv)
 		vk::ArrayProxy<const vk::Buffer> vertexBuffers = vk::ArrayProxy<const vk::Buffer>(1, &vertexBuffer);
 		vk::DeviceSize offsets[] = { 0 };
 		vk::ArrayProxy<const vk::DeviceSize> offsetsProxy = vk::ArrayProxy<const vk::DeviceSize>(1, offsets);
+
+		buffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, vulkanPipelineLayout, 0, 1, &descriptorSets[i], 0, nullptr);
 
 		buffer.bindVertexBuffers(0, vertexBuffers, offsetsProxy);
 		buffer.bindIndexBuffer(indexBuffer, 0, vk::IndexType::eUint16);
@@ -845,6 +943,7 @@ int main(int argc, char** argv)
 		vk::Semaphore waitSemaphores[] = { imageAvailableSemaphore };
 		vk::Semaphore signalSemaphores[] = { renderFinishedSemaphore };
 		vk::PipelineStageFlags waitStages[] = { vk::PipelineStageFlagBits::eColorAttachmentOutput };
+
 		vk::SubmitInfo submitInfo =
 			vk::SubmitInfo()
 			.setWaitSemaphoreCount(1)
@@ -1028,7 +1127,6 @@ vk::Fence copyBuffer(const vk::Device& device, const vk::Queue& commandQueue, co
 		.setSize(size);
 
 	copyCommandBuffer.copyBuffer(srcBuffer, dstBuffer, copyMemInfo);
-
 	copyCommandBuffer.end();
 
 	vk::SubmitInfo copySubmitInfo =
