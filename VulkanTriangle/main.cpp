@@ -1,5 +1,5 @@
 #define VK_USE_PLATFORM_WIN32_KHR 1
-#define USE_GLM 1
+#define USE_GLM
 #include <vulkan/vulkan.hpp>
 #include <iostream>
 #include <vector>
@@ -78,7 +78,9 @@ struct Vector3
 
 	Vector3 Cross(Vector3& rhs)
 	{
-		return Vector3((y * rhs.z) - (z * rhs.y), (z * rhs.x) - (x * rhs.z), (x * rhs.y) - (y * rhs.x));
+		return Vector3((y * rhs.z) - (z * rhs.y), 
+			(z * rhs.x) - (x * rhs.z),
+			(x * rhs.y) - (y * rhs.x));
 	}
 
 	float Dot(Vector3& rhs)
@@ -109,6 +111,7 @@ struct Vector4
 		};
 	};
 
+	Vector4(float initial) : x(initial), y(initial), z(initial), w(initial) {}
 	Vector4(float x, float y, float z, float w) : x(x), y(y), z(z), w(w) {}
 
 	Vector4 operator-(Vector4& rhs)
@@ -150,7 +153,10 @@ struct Vector4
 
 	Vector4 Cross(Vector4& rhs)
 	{
-		return rhs;
+		return Vector4((y * rhs.z) - (z * rhs.y),
+			(z * rhs.w) - (w * rhs.z),
+			(w * rhs.x) - (x * rhs.w),
+			(x * rhs.y) - (y * rhs.x));
 	}
 };
 
@@ -171,49 +177,48 @@ float Dot(Vector3 lhs, Vector3 rhs)
 
 struct Matrix4x4
 {
-	float xa, ya, za, wa;
-	float xr, yr, zr, wr;
-	float xg, yg, zg, wg;
-	float xb, yb, zb, wb;
+	Vector4 x;
+	Vector4 y;
+	Vector4 z;
+	Vector4 w;
+
 
 	Matrix4x4(
-		float xa, float ya, float za, float wa,
-		float xr, float yr, float zr, float wr,
-		float xg, float yg, float zg, float wg,
-		float xb, float yb, float zb, float wb) :
-		xa(xa), ya(ya), za(za), wa(wa),
-		xr(xr), yr(yr), zr(zr), wr(wr),
-		xg(xg), yg(yg), zg(zg), wg(wg),
-		xb(xb), yb(yb), zb(zb), wb(wb) {}
+		float x0, float y0, float z0, float w0,
+		float x1, float y1, float z1, float w1,
+		float x2, float y2, float z2, float w2,
+		float x3, float y3, float z3, float w3) :
+		x(x0, y0, z0, w0),
+		y(x1, y1, z1, w1),
+		z(x2, y2, z2, w2),
+		w(x3, y3, z3, w3) {}
 
 	Matrix4x4(float init) :
-		xa(init), ya(init), za(init), wa(init),
-		xr(init), yr(init), zr(init), wr(init),
-		xg(init), yg(init), zg(init), wg(init),
-		xb(init), yb(init), zb(init), wb(init) {}
+		x(init), y(init), z(init), w(init) {}
+
 
 	Matrix4x4 operator*(Matrix4x4& rhs)
 	{
 		Matrix4x4(
-			Dot(Vector4(xa, ya, za, wa), Vector4(rhs.xa, rhs.xr, rhs.xg, rhs.xb)),
-			Dot(Vector4(xa, ya, za, wa), Vector4(rhs.ya, rhs.yr, rhs.yg, rhs.yb)),
-			Dot(Vector4(xa, ya, za, wa), Vector4(rhs.za, rhs.zr, rhs.zg, rhs.zb)),
-			Dot(Vector4(xa, ya, za, wa), Vector4(rhs.wa, rhs.wr, rhs.wg, rhs.wb)),
-
-			Dot(Vector4(xr, yr, zr, wr), Vector4(rhs.xa, rhs.xr, rhs.xg, rhs.xb)),
-			Dot(Vector4(xr, yr, zr, wr), Vector4(rhs.ya, rhs.yr, rhs.yg, rhs.yb)),
-			Dot(Vector4(xr, yr, zr, wr), Vector4(rhs.za, rhs.zr, rhs.zg, rhs.zb)),
-			Dot(Vector4(xr, yr, zr, wr), Vector4(rhs.wa, rhs.wr, rhs.wg, rhs.wb)),
-
-			Dot(Vector4(xg, yg, zg, wg), Vector4(rhs.xa, rhs.xr, rhs.xg, rhs.xb)),
-			Dot(Vector4(xg, yg, zg, wg), Vector4(rhs.ya, rhs.yr, rhs.yg, rhs.yb)),
-			Dot(Vector4(xg, yg, zg, wg), Vector4(rhs.za, rhs.zr, rhs.zg, rhs.zb)),
-			Dot(Vector4(xg, yg, zg, wg), Vector4(rhs.wa, rhs.wr, rhs.wg, rhs.wb)),
-
-			Dot(Vector4(xb, yb, zb, wb), Vector4(rhs.xa, rhs.xr, rhs.xg, rhs.xb)),
-			Dot(Vector4(xb, yb, zb, wb), Vector4(rhs.ya, rhs.yr, rhs.yg, rhs.yb)),
-			Dot(Vector4(xb, yb, zb, wb), Vector4(rhs.za, rhs.zr, rhs.zg, rhs.zb)),
-			Dot(Vector4(xb, yb, zb, wb), Vector4(rhs.wa, rhs.wr, rhs.wg, rhs.wb))
+			Dot(x, rhs.x),
+			Dot(x, rhs.y),
+			Dot(x, rhs.z),
+			Dot(x, rhs.w),
+			
+			Dot(y, rhs.x),
+			Dot(y, rhs.y),
+			Dot(y, rhs.z),
+			Dot(y, rhs.w),
+			
+			Dot(z, rhs.x),
+			Dot(z, rhs.y),
+			Dot(z, rhs.z),
+			Dot(z, rhs.w),
+			
+			Dot(w, rhs.x),
+			Dot(w, rhs.y),
+			Dot(w, rhs.z),
+			Dot(w, rhs.w)
 		);
 	}
 
@@ -577,9 +582,8 @@ int main(int argc, char** argv)
 	ubo.projection[1][1] *= -1;
 #else
 	ubo.model = Matrix4x4(1.0f);
-	ubo.projection = GeneratePerspective(90.0f, (float)surfaceCapabilities.minImageExtent.width, (float)surfaceCapabilities.minImageExtent.height, 0.1f, 100.0f);
+	ubo.projection = GeneratePerspective(80.0f, (float)surfaceCapabilities.minImageExtent.width, (float)surfaceCapabilities.minImageExtent.height, 0.1f, 100.0f);
 	ubo.view = GenerateView(Vector3(2.0f, 2.0f, 2.0f), Vector3(0.0f, 0.0f, 0.0f), Vector3(0.0f, 0.0f, 1.0f));
-	ubo.projection.xb *= -1;
 #endif
 
 	vk::DeviceSize uboSize = sizeof(UniformBufferObject);
@@ -979,6 +983,7 @@ Matrix4x4 GeneratePerspective(float FoVDegrees, float Width, float Height, float
 {
 	float FoVRadians = DegreesToRadians(FoVDegrees);
 
+
 	//Projection focal length = 1 / tan(FOV / 2) with FOV in radians
 	float FocalLength = 1.0f / tan(FoVRadians / 2.0f);
 
@@ -993,9 +998,9 @@ Matrix4x4 GeneratePerspective(float FoVDegrees, float Width, float Height, float
 
 	return Matrix4x4(
 		(1.0f / (TanA * AspectRatio)), 0.0f, 0.0f, 0.0f,
-		0.0f, (1.0f / TanA), 0.0f, 0.0f,
-		0.0f, 0.0f, -(FarPlane + NearPlane / FarPlane - NearPlane), -1.0f,
-		0.0f, 0.0f, ((-NearFar2) / FarPlane - NearPlane), 0.0f);
+		0.0f, -(1.0f / TanA), 0.0f, 0.0f,
+		0.0f, 0.0f, -(FarPlane + NearPlane) / (FarPlane - NearPlane), 1.0f,
+		0.0f, 0.0f, NearFar2 / (FarPlane - NearPlane), 0.0f);
 }
 
 Matrix4x4 GenerateView(Vector3 CameraPosition, Vector3 CameraTarget, Vector3 CameraUp)
@@ -1006,9 +1011,9 @@ Matrix4x4 GenerateView(Vector3 CameraPosition, Vector3 CameraTarget, Vector3 Cam
 
 	Matrix4x4 ViewMatrix = Matrix4x4
 	(
-		xAxis.x, yAxis.x, zAxis.x, 0,
-		xAxis.y, yAxis.y, zAxis.y, 0,
-		xAxis.z, yAxis.z, zAxis.z, 0,
+		xAxis.x, yAxis.x, -zAxis.x, 1,
+		xAxis.y, yAxis.y, -zAxis.y, 1,
+		xAxis.z, yAxis.z, -zAxis.z, 1,
 		-xAxis.Dot(CameraPosition), -yAxis.Dot(CameraPosition), -zAxis.Dot(CameraPosition), 1
 	);
 
