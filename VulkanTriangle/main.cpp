@@ -437,7 +437,7 @@ int main(int argc, char** argv)
 		.setImageColorSpace(vk::ColorSpaceKHR::eSrgbNonlinear)
 		.setMinImageCount(surfaceCapabilities.minImageCount)
 		.setCompositeAlpha(compositeAlpha)
-		.setImageExtent(surfaceCapabilities.minImageExtent)
+		.setImageExtent(surfaceCapabilities.maxImageExtent)
 		.setPreTransform(surfaceCapabilities.currentTransform)
 		.setPresentMode(surfacePresentModes[3])
 		.setQueueFamilyIndexCount((uint32_t)presentGfxQueueIndex.size())
@@ -464,7 +464,7 @@ int main(int argc, char** argv)
 		vk::ImageCreateInfo()
 		.setImageType(vk::ImageType::e2D)
 		.setFormat(vk::Format::eD16Unorm)
-		.setExtent(vk::Extent3D(surfaceCapabilities.minImageExtent, 1))
+		.setExtent(vk::Extent3D(surfaceCapabilities.maxImageExtent, 1))
 		.setMipLevels(1)
 		.setArrayLayers(1)
 		.setSamples(vk::SampleCountFlagBits::e1)
@@ -564,7 +564,7 @@ int main(int argc, char** argv)
 
 
 	Matrix4x4 ModelMatrix = Matrix4x4::Identity();
-	Matrix4x4 ProjectionMatrix = GeneratePerspective(90.0f, (float)surfaceCapabilities.minImageExtent.width, (float)surfaceCapabilities.minImageExtent.height, 1.0f, 100.0f);
+	Matrix4x4 ProjectionMatrix = GeneratePerspective(90.0f, (float)surfaceCapabilities.maxImageExtent.width, (float)surfaceCapabilities.maxImageExtent.height, 1.0f, 100.0f);
 	Matrix4x4 ViewMatrix = GenerateView(Vector3(2.0f, 2.0f, 2.0f), Vector3(0.0f, 0.0f, 0.0f), Vector3(0.0f, 0.0f, 1.0f));
 	Matrix4x4 ClipMatrix = Matrix4x4(
 		1.0f, 0.0f, 0.0f, 0.0f,
@@ -577,12 +577,12 @@ int main(int argc, char** argv)
 	UniformBufferObject ubo;
 #ifdef USE_GLM
 	ubo.model = glm::mat4(1.0f);
-	ubo.projection = glm::perspective(glm::radians(80.0f), (float)surfaceCapabilities.minImageExtent.width / (float)surfaceCapabilities.minImageExtent.height, 0.1f, 100.0f);
+	ubo.projection = glm::perspective(glm::radians(80.0f), (float)surfaceCapabilities.maxImageExtent.width / (float)surfaceCapabilities.maxImageExtent.height, 0.1f, 100.0f);
 	ubo.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
 	ubo.projection[1][1] *= -1;
 #else
 	ubo.model = Matrix4x4(1.0f);
-	ubo.projection = GeneratePerspective(80.0f, (float)surfaceCapabilities.minImageExtent.width, (float)surfaceCapabilities.minImageExtent.height, 0.1f, 100.0f);
+	ubo.projection = GeneratePerspective(80.0f, (float)surfaceCapabilities.maxImageExtent.width, (float)surfaceCapabilities.maxImageExtent.height, 0.1f, 100.0f);
 	ubo.view = GenerateView(Vector3(2.0f, 2.0f, 2.0f), Vector3(0.0f, 0.0f, 0.0f), Vector3(0.0f, 0.0f, 1.0f));
 #endif
 
@@ -591,11 +591,6 @@ int main(int argc, char** argv)
 
 	for (uint32_t i = 0; i < swapChainImages.size(); i++) {
 		uniformBuffers[i] = createBuffer(vulkanDevice, vulkanPhyDevice, uboSize, vk::BufferUsageFlagBits::eUniformBuffer, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
-		const auto& [uniformBuffer, uniformBufferMemory] = uniformBuffers[i];
-		void* uniformBufferMemPtr;
-		vulkanDevice.mapMemory(uniformBufferMemory, 0, sizeof(ubo), vk::MemoryMapFlagBits(0), &uniformBufferMemPtr);
-		memcpy(uniformBufferMemPtr, &ubo, sizeof(ubo));
-		vulkanDevice.unmapMemory(uniformBufferMemory);
 	}
 
 	//Setup pipeline stages
@@ -644,12 +639,12 @@ int main(int argc, char** argv)
 	vk::Viewport viewport = vk::Viewport()
 		.setX(0.0f)
 		.setY(0.0f)
-		.setWidth((float)surfaceCapabilities.minImageExtent.width)
-		.setHeight((float)surfaceCapabilities.minImageExtent.height)
+		.setWidth((float)surfaceCapabilities.maxImageExtent.width)
+		.setHeight((float)surfaceCapabilities.maxImageExtent.height)
 		.setMinDepth(0.0f)
 		.setMaxDepth(1.0f);
 
-	vk::Rect2D  scissor = vk::Rect2D().setExtent(surfaceCapabilities.minImageExtent).setOffset({ 0, 0 });
+	vk::Rect2D  scissor = vk::Rect2D().setExtent(surfaceCapabilities.maxImageExtent).setOffset({ 0, 0 });
 
 	vk::PipelineViewportStateCreateInfo viewportStateCreateInfo =
 		vk::PipelineViewportStateCreateInfo()
@@ -828,8 +823,8 @@ int main(int argc, char** argv)
 			.setRenderPass(renderPass)
 			.setAttachmentCount(1)
 			.setPAttachments(&imageView)
-			.setWidth(surfaceCapabilities.minImageExtent.width)
-			.setHeight(surfaceCapabilities.minImageExtent.height)
+			.setWidth(surfaceCapabilities.maxImageExtent.width)
+			.setHeight(surfaceCapabilities.maxImageExtent.height)
 			.setLayers(1);
 
 		swapChainFrameBuffers.push_back(vulkanDevice.createFramebuffer(fbCreateInfo));
@@ -899,7 +894,7 @@ int main(int argc, char** argv)
 			vk::RenderPassBeginInfo()
 			.setRenderPass(renderPass)
 			.setFramebuffer(swapChainFrameBuffers[i])
-			.setRenderArea(vk::Rect2D().setOffset({ 0,0 }).setExtent(surfaceCapabilities.minImageExtent))
+			.setRenderArea(vk::Rect2D().setOffset({ 0,0 }).setExtent(surfaceCapabilities.maxImageExtent))
 			.setClearValueCount(1)
 			.setPClearValues(&clearColour);
 
@@ -940,9 +935,22 @@ int main(int argc, char** argv)
 			DispatchMessage(&message);
 		}
 
+
 		//The vulkan draw loop
 		uint32_t imageIndex;
 		vulkanDevice.acquireNextImageKHR(vulkanSwapchain, UINT64_MAX, imageAvailableSemaphore, vk::Fence(), &imageIndex);
+
+		static auto startTime = std::chrono::high_resolution_clock::now();
+
+		auto currentTime = std::chrono::high_resolution_clock::now();
+		float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
+		ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+
+		const auto& [uniformBuffer, uniformBufferMemory] = uniformBuffers[imageIndex];
+		void* uniformBufferMemPtr;
+		vulkanDevice.mapMemory(uniformBufferMemory, 0, sizeof(ubo), vk::MemoryMapFlagBits(0), &uniformBufferMemPtr);
+		memcpy(uniformBufferMemPtr, &ubo, sizeof(ubo));
+		vulkanDevice.unmapMemory(uniformBufferMemory);
 
 		vk::Semaphore waitSemaphores[] = { imageAvailableSemaphore };
 		vk::Semaphore signalSemaphores[] = { renderFinishedSemaphore };
@@ -1048,7 +1056,7 @@ HWND CreateAppWindow(HINSTANCE instance)
 	}
 
 	HWND hwnd = CreateWindowEx(0, L"VulkanTest", L"Vulkan Triangle",
-		WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, NULL, NULL, instance, NULL);
+		WS_POPUP | CBS_OWNERDRAWFIXED, CW_USEDEFAULT, CW_USEDEFAULT, 2560, 1440, NULL, NULL, instance, NULL);
 
 	ShowWindow(hwnd, SW_SHOW);
 
